@@ -9,8 +9,14 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.4
       - key: SECRET_KEY
-        generateValue: true # Render akan membuat secret key aman secara otomatis
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
+        generateValue: true
+      - key: DATABASE_URL # Ini akan otomatis diisi oleh Render
+        fromDatabase:
+          name: discord-bot-db
+          property: connectionString
+      - key: CLOUDINARY_URL
+        sync: false # Kita akan isi ini secara manual nanti
+
+databases:
+  - name: discord-bot-db
+    plan: free
