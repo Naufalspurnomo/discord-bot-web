@@ -1,0 +1,99 @@
+2025-09-04 04:34:35 | INFO | Log file has been cleared by user.
+2025-09-04 04:46:34 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 04:54:17 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:36:10 | INFO | Sending request to 1126318688354713640 with content: http://127.0.0.1:5000/uploads/a3a33e8b9088488bbace560d114c64fa_Generated_Image_September_02_2025_-_2...
+2025-09-04 05:36:11 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:53:33 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:53:33 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:53:43 | INFO | Bot worker started for profile: default.
+2025-09-04 05:53:43 | ERROR | Terjadi error saat mengirim pesan: Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+Traceback (most recent call last):
+  File "D:\Nopal\discord-bot-web\app.py", line 161, in send_message_logic
+    content_to_send = url_for('uploaded_file', filename=filename, _external=True)
+  File "D:\Python\Lib\site-packages\flask\helpers.py", line 239, in url_for
+    return current_app.url_for(
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\Python\Lib\site-packages\werkzeug\local.py", line 318, in __get__
+    obj = instance._get_current_object()
+  File "D:\Python\Lib\site-packages\werkzeug\local.py", line 519, in _get_current_object
+    raise RuntimeError(unbound_message) from None
+RuntimeError: Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+2025-09-04 05:53:53 | ERROR | Terjadi error saat mengirim pesan: Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+Traceback (most recent call last):
+  File "D:\Nopal\discord-bot-web\app.py", line 161, in send_message_logic
+    content_to_send = url_for('uploaded_file', filename=filename, _external=True)
+  File "D:\Python\Lib\site-packages\flask\helpers.py", line 239, in url_for
+    return current_app.url_for(
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\Python\Lib\site-packages\werkzeug\local.py", line 318, in __get__
+    obj = instance._get_current_object()
+  File "D:\Python\Lib\site-packages\werkzeug\local.py", line 519, in _get_current_object
+    raise RuntimeError(unbound_message) from None
+RuntimeError: Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+2025-09-04 05:54:03 | ERROR | Terjadi error saat mengirim pesan: Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+Traceback (most recent call last):
+  File "D:\Nopal\discord-bot-web\app.py", line 161, in send_message_logic
+    content_to_send = url_for('uploaded_file', filename=filename, _external=True)
+  File "D:\Python\Lib\site-packages\flask\helpers.py", line 239, in url_for
+    return current_app.url_for(
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\Python\Lib\site-packages\werkzeug\local.py", line 318, in __get__
+    obj = instance._get_current_object()
+  File "D:\Python\Lib\site-packages\werkzeug\local.py", line 519, in _get_current_object
+    raise RuntimeError(unbound_message) from None
+RuntimeError: Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+2025-09-04 05:54:05 | INFO | Bot worker stopped for profile: default.
+2025-09-04 05:54:09 | INFO | Bot worker started for profile: default.
+2025-09-04 05:54:09 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:54:10 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:54:20 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:54:20 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:54:30 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:54:31 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:54:41 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:54:42 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:54:52 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:54:53 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:55:03 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:55:03 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:55:13 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:55:15 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:55:25 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:55:26 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:55:36 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:55:37 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:55:47 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:55:47 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:55:57 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:55:58 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:56:08 | INFO | Sending request to 1126318688354713640 with content: 1...
+2025-09-04 05:56:09 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:56:19 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:56:19 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:56:29 | INFO | Sending request to 1126318688354713640 with content: Iyah...
+2025-09-04 05:56:30 | INFO | Pesan berhasil dikirim ke channel 1126318688354713640
+2025-09-04 05:56:33 | INFO | Bot worker stopped for profile: default.

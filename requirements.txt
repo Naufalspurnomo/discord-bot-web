@@ -1,0 +1,8 @@
+Flask
+Flask-Login
+gunicorn
+requests
+croniter
+werkzeug
+sqlite3
+psycopg2-binary

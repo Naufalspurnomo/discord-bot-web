@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discord Bot Control Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      /* --- PALET WARNA & DESAIN BARU --- */
+      :root {
+        --font-sans: "Inter", sans-serif;
+        /* Light Mode */
+        --bg-color: #f8f9fa;
+        --card-color: #ffffff;
+        --border-color: #e9ecef;
+        --text-color: #212529;
+        --text-muted-color: #6c757d;
+        --input-bg-color: #f1f3f5;
+        --input-border-color: #dee2e6;
+        --log-bg-color: #e9ecef;
+        --discord-blurple: #5865f2;
+        --error-border: #fa5252;
+        --error-bg: #fff5f5;
+      }
+      html.dark {
+        /* Dark Mode */
+        --bg-color: #1a1b1e;
+        --card-color: #25262b;
+        --border-color: #373a40;
+        --text-color: #c1c2c5;
+        --text-muted-color: #909296;
+        --input-bg-color: #2c2e33;
+        --input-border-color: #495057;
+        --log-bg-color: #212529;
+        --error-border: #e03131;
+        --error-bg: #4d0b0b;
+      }
+      /* --- GAYA DASAR & TRANSIISI --- */
+      body {
+        font-family: var(--font-sans);
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        transition: background-color 0.3s, color 0.3s;
+      }
+      .card {
+        background-color: var(--card-color);
+        border: 1px solid var(--border-color);
+        transition: background-color 0.3s, border-color 0.3s;
+      }
+      .form-input {
+        background-color: var(--input-bg-color);
+        color: var(--text-color);
+        border: 1px solid var(--input-border-color);
+        transition: background-color 0.3s, border-color 0.3s, box-shadow 0.2s;
+      }
+      .form-input:focus {
+        outline: none;
+        border-color: var(--discord-blurple);
+        box-shadow: 0 0 0 3px
+          color-mix(in srgb, var(--discord-blurple) 25%, transparent);
+      }
+      .form-input.error {
+        border-color: var(--error-border);
+        background-color: var(--error-bg);
+      }
+      .error-message {
+        color: var(--error-border);
+        font-size: 0.8rem;
+        margin-top: 0.25rem;
+      }
+      .log-panel {
+        background-color: var(--log-bg-color);
+        font-family: "Courier New", monospace;
+      }
+      .text-muted {
+        color: var(--text-muted-color);
+      }
+      #toast-container {
+        position: fixed;
+        bottom: 1.5rem;
+        right: 1.5rem;
+        z-index: 50;
+      }
+      .message-type-radio {
+        accent-color: var(--discord-blurple);
+      }
+      .embed-preview {
+        border-left: 4px solid;
+        padding-left: 12px;
+        margin: 10px 0;
+        max-width: 400px;
+        background-color: color-mix(
+          in srgb,
+          var(--border-color) 50%,
+          transparent
+        );
+      }
+      /* Menambahkan gaya untuk transisi yang lebih halus pada tombol */
+      button,
+      .button,
+      a {
+        transition: all 0.2s ease-in-out;
+      }
+    </style>
+  </head>
+  <body class="font-sans">
+    <div id="toast-container" class="space-y-3"></div>
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
+      <header class="flex justify-between items-center">
+        <div>
+          <h1
+            class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-500"
+          >
+            Discord Control Panel
+          </h1>
+          <p class="text-lg text-muted mt-1">
+            Advanced auto-message management
+          </p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button
+            id="theme-toggle"
+            class="flex items-center justify-center w-10 h-10 rounded-full text-xl card hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            <i class="fa-solid fa-sun"></i>
+          </button>
+          <a
+            href="/logout"
+            id="logout-btn"
+            class="flex items-center justify-center w-10 h-10 rounded-full text-xl card hover:bg-gray-100 dark:hover:bg-gray-700"
+            title="Logout"
+          >
+            <i class="fa-solid fa-sign-out-alt"></i>
+          </a>
+        </div>
+      </header>
+
+      <section class="card p-6 rounded-xl shadow-md">
+        <h2
+          class="text-xl font-semibold mb-4 pb-3 border-b"
+          style="border-color: var(--border-color)"
+        >
+          Dashboard
+        </h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div class="card p-5 rounded-lg flex items-start gap-4">
+            <div
+              class="bg-blue-100 dark:bg-blue-900/50 text-blue-500 p-3 rounded-lg"
+            >
+              <i class="fa-solid fa-satellite-dish fa-lg"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-semibold text-muted">Profile Status</h3>
+              <p id="dashboard-status" class="text-2xl font-bold">Memuat...</p>
+            </div>
+          </div>
+          <div class="card p-5 rounded-lg flex items-start gap-4">
+            <div
+              class="bg-green-100 dark:bg-green-900/50 text-green-500 p-3 rounded-lg"
+            >
+              <i class="fa-solid fa-paper-plane fa-lg"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-semibold text-muted">Messages Today</h3>
+              <p id="dashboard-messages" class="text-2xl font-bold">
+                Memuat...
+              </p>
+            </div>
+          </div>
+          <div class="card p-5 rounded-lg flex items-start gap-4">
+            <div
+              class="bg-yellow-100 dark:bg-yellow-900/50 text-yellow-500 p-3 rounded-lg"
+            >
+              <i class="fa-solid fa-clock fa-lg"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-semibold text-muted">Next Scheduled</h3>
+              <p id="dashboard-schedule" class="text-lg font-medium">
+                Memuat...
+              </p>
+            </div>
+          </div>
+          <div class="card p-5 rounded-lg">
+            <h3 class="text-sm font-semibold text-muted mb-2">Recent Logs</h3>
+            <div
+              id="dashboard-logs"
+              class="text-xs log-panel p-2 h-16 overflow-y-auto rounded-md"
+            ></div>
+          </div>
+        </div>
+      </section>
+
+      <main class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+        <div class="lg:col-span-2 space-y-8">
+          <div class="card p-6 rounded-xl shadow-md">
+            <h2
+              class="text-xl font-semibold mb-4 pb-3 border-b"
+              style="border-color: var(--border-color)"
+            >
+              Status
+            </h2>
+            <div id="status-container" class="space-y-3"></div>
+            <div class="mt-6 flex gap-3">
+              <button
+                id="start-btn"
+                class="w-full py-2.5 rounded-lg font-bold text-white bg-green-500 hover:bg-green-600 shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
+              >
+                Start Selected
+              </button>
+              <button
+                id="stop-btn"
+                class="w-full py-2.5 rounded-lg font-bold text-white bg-red-500 hover:bg-red-600 shadow-sm hover:shadow-md transform hover:-translate-y-0.5"
+              >
+                Stop Selected
+              </button>
+            </div>
+          </div>
+          <div class="card p-6 rounded-xl shadow-md">
+            <h2
+              class="text-xl font-semibold mb-4 pb-3 border-b"
+              style="border-color: var(--border-color)"
+            >
+              Analytics
+            </h2>
+            <div class="space-y-4">
+              <div class="flex flex-col sm:flex-row gap-2">
+                <select
+                  id="analytics-time-range"
+                  class="form-input p-2 rounded-lg flex-1"
+                ></select>
+                <button
+                  id="analytics-refresh"
+                  class="p-2 px-4 rounded-lg bg-gray-500 text-white hover:bg-gray-600 flex items-center justify-center"
+                >
+                  <i class="fa-solid fa-sync"></i>
+                </button>
+                <button
+                  id="analytics-export"
+                  class="p-2 px-4 rounded-lg bg-gray-500 text-white hover:bg-gray-600 flex items-center justify-center"
+                >
+                  <i class="fa-solid fa-download"></i>
+                </button>
+              </div>
+              <div class="relative h-64">
+                <canvas id="analytics-chart" height="200"></canvas>
+              </div>
+              <div id="analytics-stats" class="text-sm text-muted"></div>
+            </div>
+          </div>
+          <div class="card p-6 rounded-xl shadow-md">
+            <div
+              class="flex justify-between items-center mb-2 pb-3 border-b"
+              style="border-color: var(--border-color)"
+            >
+              <div class="flex items-center space-x-3">
+                <h2 class="text-xl font-semibold">Logs</h2>
+              </div>
+              <div class="flex items-center space-x-2 text-sm text-muted">
+                <button
+                  id="log-refresh-btn"
+                  class="text-muted hover:text-white"
+                  title="Refresh Logs"
+                >
+                  <i class="fa-solid fa-sync"></i>
+                </button>
+                <button
+                  id="log-clear-btn"
+                  class="text-muted hover:text-white"
+                  title="Clear Logs"
+                >
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+                <input
+                  type="checkbox"
+                  id="auto-refresh-log"
+                  class="form-input rounded-sm message-type-radio"
+                  checked
+                /><label for="auto-refresh-log">Auto</label>
+              </div>
+            </div>
+            <div
+              id="log-panel"
+              class="log-panel h-64 overflow-y-auto p-3 rounded-md text-sm"
+            >
+              Loading logs...
+            </div>
+          </div>
+        </div>
+
+        <div class="lg:col-span-3 card p-6 rounded-xl shadow-md">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 pb-3 border-b"
+            style="border-color: var(--border-color)"
+          >
+            <h2 class="text-xl font-semibold mb-2 sm:mb-0">
+              Configuration Profile
+            </h2>
+            <div class="flex items-center space-x-2">
+              <select
+                id="profile-select"
+                class="form-input p-2 rounded-lg"
+              ></select>
+              <button
+                id="duplicate-profile-btn"
+                class="flex items-center justify-center w-9 h-9 rounded-lg text-blue-500 hover:bg-blue-500/10"
+                title="Duplicate Profile"
+              >
+                <i class="fa-solid fa-copy"></i>
+              </button>
+              <button
+                id="delete-profile-btn"
+                class="flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-500/10"
+                title="Delete Profile"
+              >
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </div>
+          </div>
+          <div class="space-y-5">
+            <div>
+              <input
+                type="text"
+                id="profile_name"
+                class="form-input w-full p-3 rounded-lg font-bold text-base"
+                placeholder="Enter profile name..."
+              />
+              <p id="profile_name_error" class="error-message hidden"></p>
+            </div>
+
+            <div>
+              <label class="font-semibold text-sm text-muted">User Token</label>
+              <div class="relative">
+                <input
+                  type="password"
+                  id="token"
+                  class="form-input w-full mt-1 p-3 rounded-lg pr-24"
+                />
+                <button
+                  id="fetch-token-btn"
+                  class="absolute right-1 top-1/2 -translate-y-1/2 py-1.5 px-3 text-xs font-semibold rounded-md text-white bg-purple-600 hover:bg-purple-700"
+                >
+                  Get Token
+                </button>
+              </div>
+              <p id="token_error" class="error-message hidden"></p>
+            </div>
+
+            <div>
+              <label class="font-semibold text-sm text-muted">Channel ID</label>
+              <input
+                type="text"
+                id="channelid"
+                class="form-input w-full mt-1 p-3 rounded-lg"
+              />
+              <p id="channelid_error" class="error-message hidden"></p>
+            </div>
+
+            <div class="card p-4 rounded-lg border">
+              <h3 class="font-semibold text-base mb-2">
+                Schedule Configuration
+              </h3>
+              <div>
+                <label for="schedule_mode" class="text-sm text-muted"
+                  >Schedule Mode</label
+                >
+                <select
+                  id="schedule_mode"
+                  class="form-input w-full p-2.5 rounded-lg mt-1"
+                ></select>
+              </div>
+              <div id="interval_field" class="mt-4">
+                <label for="interval_seconds" class="text-sm text-muted"
+                  >Interval (seconds)</label
+                >
+                <input
+                  type="number"
+                  id="interval_seconds"
+                  value="300"
+                  class="form-input w-full p-2.5 rounded-lg mt-1"
+                />
+              </div>
+              <div id="cron_simple_field" class="mt-4 hidden">
+                <label for="cron_preset" class="text-sm text-muted"
+                  >Preset</label
+                >
+                <select
+                  id="cron_preset"
+                  class="form-input w-full p-2.5 rounded-lg mt-1"
+                ></select>
+              </div>
+              <div id="cron_advanced_field" class="mt-4 hidden space-y-3">
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label for="cron_time" class="text-sm text-muted"
+                      >Time (HH:MM)</label
+                    >
+                    <input
+                      type="time"
+                      id="cron_time"
+                      value="09:00"
+                      class="form-input w-full p-2.5 rounded-lg mt-1"
+                    />
+                  </div>
+                  <div>
+                    <label for="cron_day" class="text-sm text-muted">Day</label>
+                    <select
+                      id="cron_day"
+                      class="form-input w-full p-2.5 rounded-lg mt-1"
+                    ></select>
+                  </div>
+                </div>
+              </div>
+              <input type="hidden" id="cron_expression" />
+            </div>
+
+            <div>
+              <label class="font-semibold text-sm text-muted"
+                >Message Type</label
+              >
+              <div class="grid grid-cols-3 gap-2 mt-2">
+                <label
+                  class="card p-3 rounded-lg text-center cursor-pointer has-[:checked]:bg-blue-500 has-[:checked]:text-white has-[:checked]:border-blue-500"
+                  ><input
+                    type="radio"
+                    name="message_type"
+                    value="text"
+                    class="hidden"
+                    checked
+                  />
+                  Text</label
+                >
+                <label
+                  class="card p-3 rounded-lg text-center cursor-pointer has-[:checked]:bg-blue-500 has-[:checked]:text-white has-[:checked]:border-blue-500"
+                  ><input
+                    type="radio"
+                    name="message_type"
+                    value="embed"
+                    class="hidden"
+                  />
+                  Embed</label
+                >
+                <label
+                  class="card p-3 rounded-lg text-center cursor-pointer has-[:checked]:bg-blue-500 has-[:checked]:text-white has-[:checked]:border-blue-500"
+                >
+                  <input
+                    type="radio"
+                    name="message_type"
+                    value="attachment"
+                    class="hidden"
+                  />
+                  Attachment</label
+                >
+              </div>
+            </div>
+
+            <div id="text_message_field">
+              <label class="font-semibold text-sm text-muted">Messages</label>
+              <div id="message-list" class="space-y-2 mt-2"></div>
+              <div class="grid grid-cols-2 gap-3 mt-2">
+                <button
+                  id="add-message-btn"
+                  class="w-full py-2 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700"
+                >
+                  Add Message
+                </button>
+                <label
+                  class="w-full py-2 rounded-lg font-semibold text-white bg-green-600 hover:bg-green-700 flex items-center justify-center cursor-pointer"
+                  ><i class="fa-solid fa-upload mr-2"></i>Import<input
+                    type="file"
+                    id="import-messages"
+                    class="hidden"
+                    accept=".txt"
+                /></label>
+              </div>
+            </div>
+
+            <div id="embed_message_field" class="hidden">
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="space-y-3">
+                  <input
+                    type="text"
+                    id="embed_title"
+                    class="form-input w-full p-2 rounded-md"
+                    placeholder="Embed Title"
+                  />
+                  <textarea
+                    id="embed_description"
+                    rows="4"
+                    class="form-input w-full p-2 rounded-md"
+                    placeholder="Embed Description"
+                  ></textarea>
+                  <input
+                    type="color"
+                    id="embed_color"
+                    class="form-input p-1 h-10 w-full"
+                    value="#5865F2"
+                  />
+                </div>
+                <div>
+                  <h4 class="font-semibold text-sm text-muted mb-2">
+                    Embed Preview
+                  </h4>
+                  <div
+                    id="embed-preview"
+                    class="embed-preview p-3 rounded-md"
+                    style="border-color: #5865f2"
+                  >
+                    <h5 id="embed-preview-title" class="font-bold"></h5>
+                    <p id="embed-preview-description" class="text-sm"></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="attachment_message_field" class="hidden">
+              <div class="flex gap-4 mt-1 mb-2">
+                <label
+                  ><input
+                    type="radio"
+                    name="attachment_source"
+                    value="url"
+                    class="message-type-radio"
+                    checked
+                  />
+                  URL</label
+                >
+                <label
+                  ><input
+                    type="radio"
+                    name="attachment_source"
+                    value="local"
+                    class="message-type-radio"
+                  />
+                  Upload File</label
+                >
+              </div>
+              <div id="attachment_url_field">
+                <label class="text-sm text-muted">Image/File URL</label>
+                <input
+                  type="text"
+                  id="attachment_url"
+                  class="form-input w-full mt-1 p-2 rounded-md"
+                  placeholder="https://example.com/image.png"
+                />
+              </div>
+              <div id="attachment_local_field" class="hidden">
+                <label class="text-sm text-muted">Local File</label>
+                <div
+                  class="mt-1 flex items-center gap-2 p-2 rounded-md"
+                  style="
+                    background-color: var(--input-bg-color);
+                    border: 1px solid var(--input-border-color);
+                  "
+                >
+                  <label
+                    for="attachment_file_input"
+                    class="cursor-pointer px-3 py-1 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm"
+                    >Choose File</label
+                  >
+                  <input
+                    type="file"
+                    id="attachment_file_input"
+                    class="hidden"
+                  />
+                  <span id="attachment_file_name" class="text-sm text-muted"
+                    >No file chosen</span
+                  >
+                </div>
+                <p class="text-xs text-muted mt-1">
+                  Current saved:
+                  <code
+                    id="current_attachment_path"
+                    data-full-path="None"
+                    class="bg-gray-700 text-white p-1 rounded"
+                    >None</code
+                  >
+                </p>
+              </div>
+            </div>
+
+            <div
+              class="flex gap-3 pt-4 mt-4 border-t"
+              style="border-color: var(--border-color)"
+            >
+              <button
+                id="save-btn"
+                class="w-full py-3 rounded-lg font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/30 transform hover:-translate-y-0.5"
+              >
+                Save Profile
+              </button>
+              <button
+                id="test-btn"
+                class="w-full py-3 rounded-lg font-bold text-white bg-gray-600 hover:bg-gray-700 shadow-md transform hover:-translate-y-0.5"
+              >
+                Send Once (Test)
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      // Mengisi opsi dropdown yang sebelumnya hardcoded di HTML
+      document.addEventListener("DOMContentLoaded", () => {
+        const scheduleModeSelect = document.getElementById("schedule_mode");
+        scheduleModeSelect.innerHTML = `
+          <option value="interval">Interval</option>
+          <option value="cron_simple">Cron Presets</option>
+          <option value="cron_advanced">Cron Custom</option>
+        `;
+
+        const cronPresetSelect = document.getElementById("cron_preset");
+        cronPresetSelect.innerHTML = `
+          <option value="0 9 * * *">Setiap Hari pukul 09:00</option>
+          <option value="0 14 * * 1-5">Setiap Hari Kerja (Sen-Jum) pukul 14:00</option>
+          <option value="0 0 * * 0">Setiap Minggu (dini hari)</option>
+          <option value="0 12 1 * *">Setiap Awal Bulan pukul 12:00</option>
+        `;
+
+        const cronDaySelect = document.getElementById("cron_day");
+        cronDaySelect.innerHTML = `
+          <option value="*">Setiap Hari</option>
+          <option value="1-5">Hari Kerja (Sen-Jum)</option>
+          <option value="6,0">Akhir Pekan (Sab-Min)</option>
+          <option value="1">Senin</option>
+          <option value="2">Selasa</option>
+          <option value="3">Rabu</option>
+          <option value="4">Kamis</option>
+          <option value="5">Jumat</option>
+          <option value="6">Sabtu</option>
+          <option value="0">Minggu</option>
+        `;
+
+        const analyticsTimeRange = document.getElementById(
+          "analytics-time-range"
+        );
+        analyticsTimeRange.innerHTML = `
+            <option value="daily">Last 24 Hours</option>
+            <option value="weekly">Last 7 Days</option>
+            <option value="monthly">Last 30 Days</option>
+        `;
+      });
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>

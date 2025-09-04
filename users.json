@@ -1,0 +1,14 @@
+{
+  "1": {
+    "username": "admin",
+    "password_hash": "scrypt:32768:8:1$ct8cIJnnFCfsxH8e$c657cf90682ac056fb141fb1641387f0e19559ddbd5ff6642fb6221cd924632b436500113575ac85352bc5ba76e36eb30f5019c961e22e3197ea2e0abaf179b2"
+  },
+  "2": {
+    "username": "Nopal",
+    "password_hash": "scrypt:32768:8:1$yGSTI3f03iXTEild$e675fbccb6be9ab9d24502309a830e6ebd50dcafae6d8c45eafaa2d282b32405a639397f413151a604f0a45987846ca35a7b07988296d295829166c6d4304cc7"
+  },
+  "3": {
+    "username": "Ain",
+    "password_hash": "scrypt:32768:8:1$lA0uUNPNrUcV1mNI$8d338caa7f3b3ee22f98494c98389c144b7c4174661ed4c131a32489d0526e8bb3e9bac7784b3f5df429740337e38cb45eca754870bdd4ee613c6b91ca3b596b"
+  }
+}

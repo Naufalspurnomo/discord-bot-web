@@ -1,0 +1,64 @@
+{
+  "users": {
+    "2": {
+      "profiles": {
+        "default": {
+          "token": "NjEwMzQ3OTI2OTYyNzAwMjkw.GOwgqd.KOsuw9o4PLpvbzEFGMGlAFRQ93miuk4nYmgMC8",
+          "channelid": "1126318688354713640",
+          "schedule_mode": "interval",
+          "interval_seconds": 10,
+          "cron_expression": "",
+          "messages": [
+            {
+              "type": "text",
+              "content": "1"
+            },
+            {
+              "type": "text",
+              "content": "Iyah"
+            }
+          ]
+        },
+        "Nopal Aasd": {
+          "token": "NjEwMzQ3OTI2OTYyNzAwMjkw.GOwgqd.KOsuw9o4PLpvbzEFGMGlAFRQ93miuk4nYmgMC8",
+          "channelid": "1060949452610883677",
+          "schedule_mode": "interval",
+          "interval_seconds": 50,
+          "cron_expression": "",
+          "messages": [
+            {
+              "type": "embed",
+              "data": {
+                "title": "TESSS",
+                "description": "ss",
+                "color": 5793266
+              }
+            }
+          ]
+        },
+        "TESSS": {
+          "token": "NjEwMzQ3OTI2OTYyNzAwMjkw.GOwgqd.KOsuw9o4PLpvbzEFGMGlAFRQ93miuk4nYmgMC8",
+          "channelid": "1126318688354713640",
+          "schedule_mode": "interval",
+          "interval_seconds": 10,
+          "cron_expression": "",
+          "messages": [
+            {
+              "type": "text",
+              "content": "cxzx"
+            }
+          ]
+        }
+      }
+    },
+    "3": {
+      "profiles": {
+        "default": {
+          "token": "",
+          "channelid": "",
+          "messages": []
+        }
+      }
+    }
+  }
+}
