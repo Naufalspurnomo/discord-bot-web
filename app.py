@@ -3,37 +3,49 @@
 """
 Advanced Discord Auto Message Bot with Flask Web UI
 """
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, send_from_directory
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-import http.client, json, time, os, sys, random, logging, threading, uuid
+import http.client, json, time, os, sys, random, logging, threading
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import deque
 from croniter import croniter
 from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
-import sqlite3
+import psycopg2
+from psycopg2.extras import DictCursor
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+from urllib.parse import urljoin
 
 # --- INISIALISASI & KONFIGURASI ---
 app = Flask(__name__)
-# Gunakan Environment Variable untuk keamanan
 app.secret_key = os.environ.get('SECRET_KEY', 'fallback-secret-key-yang-aman')
+app.config['UPLOAD_FOLDER'] = os.path.join(os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__))), 'temp_uploads')
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
 
-# Render menyediakan 'data directory' untuk penyimpanan file persisten
-DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
-CFG_PATH = os.path.join(DATA_DIR, 'config.json')
-LOG_PATH = os.path.join(DATA_DIR, 'bot.log')
-DB_PATH = os.path.join(DATA_DIR, 'analytics.db') # Path database SQLite
-USERS_PATH = os.path.join(DATA_DIR, 'users.json')
-UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
+# Cloudinary configuration
+cloudinary.config(
+    cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
+    api_key=os.environ.get('CLOUDINARY_API_KEY'),
+    api_secret=os.environ.get('CLOUDINARY_API_SECRET')
+)
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# PostgreSQL configuration
+DB_CONFIG = {
+    'dbname': os.environ.get('PG_DBNAME', 'discord_bot'),
+    'user': os.environ.get('PG_USER', 'admin'),
+    'password': os.environ.get('PG_PASSWORD', 'password'),
+    'host': os.environ.get('PG_HOST', 'localhost'),
+    'port': os.environ.get('PG_PORT', '5432')
+}
 
 bot_threads = {}
 stop_events = {}
 bot_status_lock = threading.Lock()
 bot_status = {}
+log = None  # Initialized in setup_logger
 
 # --- FLASK-LOGIN ---
 login_manager = LoginManager()
@@ -48,127 +60,188 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    users = get_all_users()
-    user_data = users.get(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT id, username, password_hash FROM users WHERE id = %s", (user_id,))
+    user_data = cur.fetchone()
+    cur.close()
+    conn.close()
     if user_data:
-        return User(user_id, user_data.get('username'), user_data.get('password_hash'))
+        return User(user_data['id'], user_data['username'], user_data['password_hash'])
     return None
 
-# --- LOGGING & DATA MANAGEMENT ---
+# --- DATABASE HELPER FUNCTIONS ---
+def get_db_connection():
+    return psycopg2.connect(**DB_CONFIG)
+
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS profiles (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            profile_name VARCHAR(100) NOT NULL,
+            token TEXT NOT NULL,
+            channelid TEXT NOT NULL,
+            schedule_mode VARCHAR(20) DEFAULT 'interval',
+            interval_seconds INTEGER DEFAULT 300,
+            cron_expression TEXT,
+            messages JSONB NOT NULL,
+            UNIQUE (user_id, profile_name)
+        );
+        CREATE TABLE IF NOT EXISTS sends (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            profile_name VARCHAR(100) NOT NULL,
+            timestamp TIMESTAMP NOT NULL,
+            success BOOLEAN NOT NULL
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# --- LOGGING ---
 def setup_logger():
-    logger = logging.getLogger("discordbot")
-    logger.setLevel(logging.INFO)
-    if logger.hasHandlers(): logger.handlers.clear()
-    fh = RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    global log
+    log = logging.getLogger("discordbot")
+    log.setLevel(logging.INFO)
+    if log.hasHandlers():
+        log.handlers.clear()
+    log_path = os.path.join(os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__))), 'bot.log')
+    fh = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S")
     fh.setFormatter(fmt)
-    logger.addHandler(fh)
+    log.addHandler(fh)
     ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(fmt)
-    logger.addHandler(ch)
-    return logger
-log = setup_logger()
+    log.addHandler(ch)
+    return log
 
+# --- DATA MANAGEMENT ---
 def get_all_users():
-    if not os.path.exists(USERS_PATH):
-        default_users = {"1": {"username": "admin", "password_hash": generate_password_hash("password")}}
-        with open(USERS_PATH, 'w') as f: json.dump(default_users, f, indent=2)
-        return default_users
-    with open(USERS_PATH, 'r', encoding='utf-8') as f: return json.load(f)
-
-def get_all_profiles():
-    if not os.path.exists(CFG_PATH):
-        default_config = {"users": {"1": {"profiles": {"default": {"token": "", "channelid": "", "schedule_mode": "interval", "interval_seconds": 300, "cron_expression": "", "messages": [{"type": "text", "content": "Hello World!"}]}}}}}
-        with open(CFG_PATH, 'w') as f: json.dump(default_config, f, indent=2)
-        return default_config
-    with open(CFG_PATH, 'r', encoding='utf-8') as f: return json.load(f)
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT id, username, password_hash FROM users")
+    users = {str(row['id']): {'username': row['username'], 'password_hash': row['password_hash']} for row in cur.fetchall()}
+    cur.close()
+    conn.close()
+    return users
 
 def get_user_profiles(user_id):
-    config = get_all_profiles()
-    return config.get("users", {}).get(str(user_id), {}).get("profiles", {})
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT profile_name, token, channelid, schedule_mode, interval_seconds, cron_expression, messages FROM profiles WHERE user_id = %s", (user_id,))
+    profiles = {row['profile_name']: {
+        'token': row['token'],
+        'channelid': row['channelid'],
+        'schedule_mode': row['schedule_mode'],
+        'interval_seconds': row['interval_seconds'],
+        'cron_expression': row['cron_expression'],
+        'messages': row['messages']
+    } for row in cur.fetchall()}
+    cur.close()
+    conn.close()
+    return profiles
 
 def get_profile_config(user_id, profile_name="default"):
-    profiles = get_user_profiles(user_id)
-    config = profiles.get(profile_name, {})
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT token, channelid, schedule_mode, interval_seconds, cron_expression, messages FROM profiles WHERE user_id = %s AND profile_name = %s", (user_id, profile_name))
+    config = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not config:
+        return {
+            "token": "", "channelid": "", "schedule_mode": "interval",
+            "interval_seconds": 300, "cron_expression": "",
+            "messages": [{"type": "text", "content": "Hello World!"}]
+        }
     return {
-        "token": config.get("token", ""), "channelid": config.get("channelid", ""),
-        "schedule_mode": config.get("schedule_mode", "interval"), "interval_seconds": config.get("interval_seconds", 300),
-        "cron_expression": config.get("cron_expression", ""),
-        "messages": config.get("messages", [{"type": "text", "content": "Hello World!"}])
+        "token": config['token'], "channelid": config['channelid'],
+        "schedule_mode": config['schedule_mode'], "interval_seconds": config['interval_seconds'],
+        "cron_expression": config['cron_expression'], "messages": config['messages']
     }
 
-def setup_analytics_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS sends (id INTEGER PRIMARY KEY, user_id TEXT, profile_name TEXT, timestamp DATETIME, success BOOLEAN)''')
-    conn.commit()
-    conn.close()
-setup_analytics_db()
-
 def log_send(user_id, profile_name, success):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c = conn.cursor()
-    c.execute("INSERT INTO sends (user_id, profile_name, timestamp, success) VALUES (?, ?, ?, ?)", (str(user_id), profile_name, datetime.now(), success))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO sends (user_id, profile_name, timestamp, success) VALUES (%s, %s, %s, %s)",
+                (user_id, profile_name, datetime.now(), success))
     conn.commit()
+    cur.close()
     conn.close()
 
 def get_dashboard_data(user_id):
     profiles = get_user_profiles(user_id)
     active_count = sum(1 for profile_name in profiles if bot_status.get(profile_name, {}).get("running", False))
     stopped_count = len(profiles) - active_count
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c = conn.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    c.execute("SELECT success FROM sends WHERE user_id = ? AND timestamp >= ?", (str(user_id), today))
-    rows = c.fetchall()
-    total_sent, failed_sent = len(rows), len([r for r in rows if not r[0]])
-    try:
-        with open(LOG_PATH, 'r', encoding='utf-8') as f: recent_logs = deque(f, 5)
-    except FileNotFoundError: recent_logs = ["No logs available."]
+    cur.execute("SELECT success FROM sends WHERE user_id = %s AND timestamp >= %s", (user_id, today))
+    rows = cur.fetchall()
+    total_sent = len(rows)
+    failed_sent = len([r for r in rows if not r['success']])
+    cur.execute("SELECT message FROM logs WHERE user_id = %s ORDER BY timestamp DESC LIMIT 5", (user_id,))
+    recent_logs = [row['message'] for row in cur.fetchall()]
     next_schedule, earliest_next_run = "None scheduled", None
     for profile_name in profiles:
         if bot_status.get(profile_name, {}).get("running", False):
             config = get_profile_config(user_id, profile_name)
-            schedule_mode, current_next_run = config.get("schedule_mode", "interval"), None
+            schedule_mode = config.get("schedule_mode", "interval")
+            current_next_run = None
             if schedule_mode == "interval":
-                interval, last_run_str = config.get("interval_seconds", 300), bot_status[profile_name].get("last_run", "-")
+                interval = config.get("interval_seconds", 300)
+                last_run_str = bot_status.get(profile_name, {}).get("last_run", "-")
                 if last_run_str != "-":
-                    try: current_next_run = datetime.combine(datetime.today(), datetime.strptime(last_run_str, "%H:%M:%S").time()) + timedelta(seconds=interval)
-                    except ValueError: pass
+                    try:
+                        last_run = datetime.strptime(last_run_str, "%H:%M:%S")
+                        current_next_run = datetime.combine(datetime.today(), last_run.time()) + timedelta(seconds=interval)
+                    except ValueError:
+                        pass
             elif schedule_mode in ["cron_simple", "cron_advanced"]:
                 if cron_expr := config.get("cron_expression"):
-                    try: current_next_run = croniter(cron_expr, datetime.now()).get_next(datetime)
-                    except Exception: pass
+                    try:
+                        current_next_run = croniter(cron_expr, datetime.now()).get_next(datetime)
+                    except Exception:
+                        pass
             if current_next_run and (earliest_next_run is None or current_next_run < earliest_next_run):
                 earliest_next_run = current_next_run
                 next_schedule = f"'{profile_name}' at {earliest_next_run.strftime('%H:%M:%S')}"
+    cur.close()
     conn.close()
-    return {"status": f"{active_count} Active / {stopped_count} Stopped", "messages": f"{total_sent} Sent ({failed_sent} Failed)", "recent_logs": list(recent_logs), "next_schedule": next_schedule}
+    return {
+        "status": f"{active_count} Active / {stopped_count} Stopped",
+        "messages": f"{total_sent} Sent ({failed_sent} Failed)",
+        "recent_logs": recent_logs or ["No logs available."],
+        "next_schedule": next_schedule
+    }
 
-# --- FUNGSI BOT (FIXED for Attachment) ---
+# --- BOT LOGIC ---
 def send_message_logic(channel_id, token, message):
     try:
         content_to_send = ""
         msg_type = message.get('type')
-
         if msg_type == 'text':
-            content_to_send = message.get('content', '')
+            content_to_send = message.get('content', '').replace("{now}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         elif msg_type == 'embed':
             data = message.get('data', {})
             content_to_send = f"**{data.get('title', '')}**\n{data.get('description', '')}"
         elif msg_type == 'attachment':
-            source_type = message.get('source', 'url')
-            path = message.get('path', '')
-            if source_type == 'local':
-                filename = os.path.basename(path)
-                content_to_send = url_for('uploaded_file', filename=filename, _external=True)
-            else:
-                content_to_send = path
-
-        if not content_to_send or not content_to_send.strip():
+            content_to_send = message.get('url', '')
+            if not content_to_send:
+                log.error("Attachment URL is empty, skipping.")
+                return False
+        if not content_to_send.strip():
             log.error("Content to send is empty, skipping.")
             return False
-
         headers = {"Authorization": token, "Content-Type": "application/json"}
         body = json.dumps({"content": content_to_send, "tts": False})
         log.info(f"Sending request to {channel_id} with content: {content_to_send[:100]}...")
@@ -176,7 +249,7 @@ def send_message_logic(channel_id, token, message):
         conn.request("POST", f"/api/v10/channels/{channel_id}/messages", body=body, headers=headers)
         resp = conn.getresponse()
         resp_body = resp.read().decode(errors='ignore')
-        if 199 < resp.status < 300:
+        if 200 <= resp.status < 300:
             log.info(f"Pesan berhasil dikirim ke channel {channel_id}")
             return True
         else:
@@ -186,9 +259,9 @@ def send_message_logic(channel_id, token, message):
         log.exception(f"Terjadi error saat mengirim pesan: {e}")
         return False
     finally:
-        if 'conn' in locals() and conn: conn.close()
+        if 'conn' in locals():
+            conn.close()
 
-# --- WORKER BOT ---
 def bot_worker(user_id, profile_name):
     global bot_status, stop_events
     cfg = get_profile_config(user_id, profile_name)
@@ -196,13 +269,12 @@ def bot_worker(user_id, profile_name):
     interval, cron_expr = int(cfg.get('interval_seconds', 300)), cfg.get('cron_expression', '')
     if not all([token, channel_id, messages]):
         log.error(f"Worker stopped [{profile_name}]: Missing config.")
-        with bot_status_lock: bot_status[profile_name]["running"] = False
+        with bot_status_lock:
+            bot_status[profile_name]["running"] = False
         return
     log.info(f"Bot worker started for profile: {profile_name}.")
     while not stop_events[profile_name].is_set():
         message = random.choice(messages)
-        if message.get('type') == 'text':
-            message['content'] = message.get('content', '').replace("{now}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         success = send_message_logic(channel_id, token, message)
         log_send(user_id, profile_name, success)
         if success:
@@ -211,7 +283,8 @@ def bot_worker(user_id, profile_name):
                 bot_status[profile_name]["last_run"] = datetime.now().strftime("%H:%M:%S")
         if schedule_mode == 'interval':
             for _ in range(interval):
-                if stop_events[profile_name].is_set(): break
+                if stop_events[profile_name].is_set():
+                    break
                 time.sleep(1)
         elif schedule_mode in ['cron_simple', 'cron_advanced'] and cron_expr:
             try:
@@ -223,36 +296,51 @@ def bot_worker(user_id, profile_name):
                 log.error(f"Cron error for '{profile_name}': {e}. Stopping.")
                 break
     log.info(f"Bot worker stopped for profile: {profile_name}.")
-    with bot_status_lock: bot_status[profile_name]["running"] = False
+    with bot_status_lock:
+        bot_status[profile_name]["running"] = False
 
 # --- ROUTES ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if current_user.is_authenticated: return redirect(url_for('index'))
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
     if request.method == 'POST':
-        username, password, users = request.form['username'], request.form['password'], get_all_users()
-        user_id = next((uid for uid, u in users.items() if u['username'] == username), None)
-        if user_id and check_password_hash(users[user_id]['password_hash'], password):
-            login_user(User(user_id, username, users[user_id]['password_hash']), remember=True)
+        username, password = request.form['username'], request.form['password']
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=DictCursor)
+        cur.execute("SELECT id, username, password_hash FROM users WHERE username = %s", (username,))
+        user_data = cur.fetchone()
+        cur.close()
+        conn.close()
+        if user_data and check_password_hash(user_data['password_hash'], password):
+            login_user(User(user_data['id'], user_data['username'], user_data['password_hash']), remember=True)
             return redirect(url_for('index'))
-        else: flash('Username atau password salah.', 'danger')
+        else:
+            flash('Username atau password salah.', 'danger')
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    if current_user.is_authenticated: return redirect(url_for('index'))
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
     if request.method == 'POST':
-        username, password, users = request.form['username'], request.form['password'], get_all_users()
-        if any(u['username'] == username for u in users.values()):
+        username, password = request.form['username'], request.form['password']
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if cur.fetchone():
+            cur.close()
+            conn.close()
             flash('Username sudah digunakan.', 'danger')
             return redirect(url_for('register'))
-        new_user_id = str(max(map(int, users.keys())) + 1 if users else 1)
-        users[new_user_id] = {'username': username, 'password_hash': generate_password_hash(password)}
-        with open(USERS_PATH, 'w') as f: json.dump(users, f, indent=2)
-        all_profiles = get_all_profiles()
-        if "users" not in all_profiles: all_profiles["users"] = {}
-        all_profiles["users"][new_user_id] = {"profiles": {"default": {"token": "", "channelid": "", "messages": []}}}
-        with open(CFG_PATH, 'w') as f: json.dump(all_profiles, f, indent=2)
+        password_hash = generate_password_hash(password)
+        cur.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s) RETURNING id", (username, password_hash))
+        user_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO profiles (user_id, profile_name, token, channelid, schedule_mode, interval_seconds, cron_expression, messages) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (user_id, "default", "", "", "interval", 300, "", json.dumps([{"type": "text", "content": "Hello World!"}])))
+        conn.commit()
+        cur.close()
+        conn.close()
         flash('Registrasi berhasil! Silakan login.', 'success')
         return redirect(url_for('login'))
     return render_template('register.html')
@@ -260,43 +348,47 @@ def register():
 @app.route('/logout')
 @login_required
 def logout():
-    logout_user()
-    return redirect(url_for('login'))
+    try:
+        logout_user()
+        log.info(f"User {current_user.id} logged out successfully.")
+        return redirect(url_for('login'))
+    except Exception as e:
+        log.error(f"Logout failed for user {current_user.id}: {str(e)}")
+        return jsonify({"message": f"Logout failed: {str(e)}"}), 500
 
 @app.route('/')
 @login_required
 def index():
     return render_template('index.html')
 
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-# --- API ROUTES ---
 @app.route('/api/upload_attachment', methods=['POST'])
 @login_required
 def upload_attachment():
-    if 'file' not in request.files: return jsonify({"message": "No file part"}), 400
+    if 'file' not in request.files:
+        return jsonify({"message": "No file part"}), 400
     file = request.files['file']
-    if file.filename == '': return jsonify({"message": "No selected file"}), 400
-    if file:
-        filename = secure_filename(file.filename)
-        unique_filename = f"{uuid.uuid4().hex}_{filename}"
-        filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
-        file.save(filepath)
-        return jsonify({"message": "File uploaded", "filepath": filepath})
-    return jsonify({"message": "Upload failed"}), 500
+    if file.filename == '':
+        return jsonify({"message": "No selected file"}), 400
+    try:
+        # Upload to Cloudinary
+        upload_result = cloudinary.uploader.upload(file, resource_type="auto")
+        return jsonify({"message": "File uploaded", "filepath": upload_result['secure_url']})
+    except Exception as e:
+        log.error(f"Error uploading to Cloudinary: {e}")
+        return jsonify({"message": f"Upload failed: {str(e)}"}), 500
 
 @app.route('/api/start', methods=['POST'])
 @login_required
 def start_bot():
-    global bot_threads, stop_events, bot_status
     profile_name = request.json.get("profile", "default")
-    if profile_name in bot_threads and bot_threads[profile_name].is_alive(): return jsonify({"message": "Bot sudah berjalan!"})
+    if profile_name in bot_threads and bot_threads[profile_name].is_alive():
+        return jsonify({"message": "Bot sudah berjalan!"})
     with bot_status_lock:
-        if profile_name not in stop_events: stop_events[profile_name] = threading.Event()
+        if profile_name not in stop_events:
+            stop_events[profile_name] = threading.Event()
         stop_events[profile_name].clear()
-        if profile_name not in bot_status: bot_status[profile_name] = {}
+        if profile_name not in bot_status:
+            bot_status[profile_name] = {}
         bot_status[profile_name].update({"running": True, "sent_count": 0, "last_run": "-"})
     bot_threads[profile_name] = threading.Thread(target=bot_worker, args=(current_user.id, profile_name))
     bot_threads[profile_name].start()
@@ -305,9 +397,9 @@ def start_bot():
 @app.route('/api/stop', methods=['POST'])
 @login_required
 def stop_bot():
-    global stop_events, bot_threads
     profile_name = request.json.get("profile", "default")
-    if profile_name not in bot_threads or not bot_threads[profile_name].is_alive(): return jsonify({"message": "Bot tidak berjalan."})
+    if profile_name not in bot_threads or not bot_threads[profile_name].is_alive():
+        return jsonify({"message": "Bot tidak berjalan."})
     stop_events[profile_name].set()
     bot_threads[profile_name].join(timeout=5)
     return jsonify({"message": "Bot dihentikan."})
@@ -317,13 +409,13 @@ def stop_bot():
 def send_once():
     data = request.json
     profile_name, token, channel_id, messages = data.get("profile", "default"), data.get('token'), data.get('channelid'), data.get('messages')
-    if not all([token, channel_id, messages]): return jsonify({"success": False, "message": "Konfigurasi tidak lengkap untuk tes."})
+    if not all([token, channel_id, messages]):
+        return jsonify({"success": False, "message": "Konfigurasi tidak lengkap untuk tes."})
     message = random.choice(messages)
-    if message.get('type') == 'text' and message.get('content'):
-        message['content'] = message['content'].replace("{now}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     success = send_message_logic(channel_id, token, message)
     log_send(current_user.id, profile_name, success)
-    if success: return jsonify({"success": True, "message": "Pesan tes berhasil dikirim!"})
+    if success:
+        return jsonify({"success": True, "message": "Pesan tes berhasil dikirim!"})
     return jsonify({"success": False, "message": "Gagal mengirim pesan tes. Cek log."})
 
 @app.route('/api/status')
@@ -338,9 +430,13 @@ def get_status():
 @app.route('/api/logs')
 @login_required
 def get_logs():
-    try:
-        with open(LOG_PATH, 'r', encoding='utf-8') as f: return jsonify({"logs": "".join(deque(f, 15))})
-    except FileNotFoundError: return jsonify({"logs": "File log belum dibuat."})
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT message FROM logs WHERE user_id = %s ORDER BY timestamp DESC LIMIT 15", (current_user.id,))
+    logs = [row['message'] for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return jsonify({"logs": "".join(logs) if logs else "No logs available."})
 
 @app.route('/api/profiles', methods=['GET'])
 @login_required
@@ -359,14 +455,24 @@ def save_profile():
     data = request.json
     try:
         profile_name = data.get("profile_name", "default").strip()
-        if not profile_name: return jsonify({"message": "Nama profil tidak boleh kosong."}), 400
-        all_data, user_id = get_all_profiles(), str(current_user.id)
-        if "users" not in all_data: all_data["users"] = {}
-        if user_id not in all_data["users"]: all_data["users"][user_id] = {"profiles": {}}
+        if not profile_name:
+            return jsonify({"message": "Nama profil tidak boleh kosong."}), 400
         messages = data.get("messages", [])
-        if not messages: return jsonify({"message": "Pesan tidak boleh kosong."}), 400
-        all_data["users"][user_id]["profiles"][profile_name] = {"token": data.get("token", ""), "channelid": data.get("channelid", ""), "schedule_mode": data.get("schedule_mode", "interval"), "interval_seconds": int(data.get("interval_seconds", 300)), "cron_expression": data.get("cron_expression", ""), "messages": messages}
-        with open(CFG_PATH, 'w', encoding='utf-8') as f: json.dump(all_data, f, indent=2)
+        if not messages:
+            return jsonify({"message": "Pesan tidak boleh kosong."}), 400
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO profiles (user_id, profile_name, token, channelid, schedule_mode, interval_seconds, cron_expression, messages)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, profile_name) DO UPDATE
+            SET token = EXCLUDED.token, channelid = EXCLUDED.channelid, schedule_mode = EXCLUDED.schedule_mode,
+                interval_seconds = EXCLUDED.interval_seconds, cron_expression = EXCLUDED.cron_expression, messages = EXCLUDED.messages
+        """, (current_user.id, profile_name, data.get("token", ""), data.get("channelid", ""), data.get("schedule_mode", "interval"),
+              int(data.get("interval_seconds", 300)), data.get("cron_expression", ""), json.dumps(messages)))
+        conn.commit()
+        cur.close()
+        conn.close()
         return jsonify({"message": f"Profil '{profile_name}' berhasil disimpan!"})
     except Exception as e:
         log.error(f"Error saving profile: {e}")
@@ -377,19 +483,29 @@ def save_profile():
 def delete_profile():
     try:
         profile_name = request.json.get("profile").strip()
-        if profile_name == "default" and len(get_user_profiles(current_user.id)) <= 1:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM profiles WHERE user_id = %s", (current_user.id,))
+        if cur.fetchone()[0] <= 1 and profile_name == "default":
+            cur.close()
+            conn.close()
             return jsonify({"message": "Tidak dapat menghapus satu-satunya profil."}), 400
-        all_data, user_id = get_all_profiles(), str(current_user.id)
-        if user_id in all_data["users"] and profile_name in all_data["users"][user_id]["profiles"]:
-            del all_data["users"][user_id]["profiles"][profile_name]
-            with open(CFG_PATH, 'w', encoding='utf-8') as f: json.dump(all_data, f, indent=2)
-            if profile_name in bot_threads and bot_threads[profile_name].is_alive():
-                stop_events[profile_name].set()
-                bot_threads[profile_name].join(timeout=5)
-            with bot_status_lock:
-                if profile_name in bot_status: del bot_status[profile_name]
-            return jsonify({"message": f"Profil '{profile_name}' berhasil dihapus!"})
-        return jsonify({"message": f"Profil '{profile_name}' tidak ditemukan."}), 404
+        cur.execute("DELETE FROM profiles WHERE user_id = %s AND profile_name = %s", (current_user.id, profile_name))
+        if cur.rowcount == 0:
+            cur.close()
+            conn.close()
+            return jsonify({"message": f"Profil '{profile_name}' tidak ditemukan."}), 404
+        cur.execute("DELETE FROM sends WHERE user_id = %s AND profile_name = %s", (current_user.id, profile_name))
+        conn.commit()
+        cur.close()
+        conn.close()
+        if profile_name in bot_threads and bot_threads[profile_name].is_alive():
+            stop_events[profile_name].set()
+            bot_threads[profile_name].join(timeout=5)
+        with bot_status_lock:
+            if profile_name in bot_status:
+                del bot_status[profile_name]
+        return jsonify({"message": f"Profil '{profile_name}' berhasil dihapus!"})
     except Exception as e:
         log.error(f"Error deleting profile: {e}")
         return jsonify({"message": f"Error: {str(e)}"}), 500
@@ -399,13 +515,26 @@ def delete_profile():
 def duplicate_profile():
     try:
         profile_name = request.json.get("profile_name").strip()
-        all_data, user_id = get_all_profiles(), str(current_user.id)
-        user_profiles = all_data.get("users", {}).get(user_id, {}).get("profiles", {})
-        if profile_name not in user_profiles: return jsonify({"message": f"Profil '{profile_name}' tidak ditemukan."}), 404
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=DictCursor)
+        cur.execute("SELECT * FROM profiles WHERE user_id = %s AND profile_name = %s", (current_user.id, profile_name))
+        profile = cur.fetchone()
+        if not profile:
+            cur.close()
+            conn.close()
+            return jsonify({"message": f"Profil '{profile_name}' tidak ditemukan."}), 404
         new_profile_name = f"{profile_name}_copy_{random.randint(100, 999)}"
-        while new_profile_name in user_profiles: new_profile_name = f"{profile_name}_copy_{random.randint(100, 999)}"
-        user_profiles[new_profile_name] = user_profiles[profile_name].copy()
-        with open(CFG_PATH, 'w', encoding='utf-8') as f: json.dump(all_data, f, indent=2)
+        cur.execute("SELECT 1 FROM profiles WHERE user_id = %s AND profile_name = %s", (current_user.id, new_profile_name))
+        while cur.fetchone():
+            new_profile_name = f"{profile_name}_copy_{random.randint(100, 999)}"
+        cur.execute("""
+            INSERT INTO profiles (user_id, profile_name, token, channelid, schedule_mode, interval_seconds, cron_expression, messages)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (current_user.id, new_profile_name, profile['token'], profile['channelid'], profile['schedule_mode'],
+              profile['interval_seconds'], profile['cron_expression'], json.dumps(profile['messages'])))
+        conn.commit()
+        cur.close()
+        conn.close()
         return jsonify({"message": f"Profil '{profile_name}' diduplikasi sebagai '{new_profile_name}'!", "new_profile_name": new_profile_name})
     except Exception as e:
         log.error(f"Error duplicating profile: {e}")
@@ -420,62 +549,61 @@ def get_dashboard():
 @login_required
 def clear_logs():
     try:
-        with open(LOG_PATH, 'w') as f: pass
-        log.info("Log file has been cleared by user.")
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM logs WHERE user_id = %s", (current_user.id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        log.info(f"Logs cleared by user {current_user.id}.")
         return jsonify({"message": "Log berhasil dibersihkan!"})
     except Exception as e:
-        log.error(f"Failed to clear log file: {e}")
+        log.error(f"Failed to clear logs: {e}")
         return jsonify({"message": f"Gagal membersihkan log: {str(e)}"}), 500
 
 @app.route('/api/analytics', methods=['GET'])
 @login_required
 def get_analytics():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c = conn.cursor()
-    time_range, limits = request.args.get('range', 'daily'), {'daily': 24*60*60, 'weekly': 7*24*60*60, 'monthly': 30*24*60*60}
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    time_range = request.args.get('range', 'daily')
+    limits = {'daily': 24*60*60, 'weekly': 7*24*60*60, 'monthly': 30*24*60*60}
     cutoff = datetime.now() - timedelta(seconds=limits.get(time_range, 24*60*60))
-    
-    # Get current profiles for the user
     current_profiles = list(get_user_profiles(current_user.id).keys())
-    
     if not current_profiles:
+        cur.close()
         conn.close()
         return jsonify({"dates": [], "success": 0, "failure": 0, "total": 0, "profiles": {}})
-    
-    # Ambil data dari database yang cocok
-    c.execute("SELECT timestamp, success, profile_name FROM sends WHERE user_id = ? AND timestamp >= ? AND profile_name IN ({}) ORDER BY timestamp ASC".format(','.join('?' * len(current_profiles))), 
-             [current_user.id, cutoff] + current_profiles)
-    rows = c.fetchall()
-    
-    # --- LOGIKA BARU DIMULAI DI SINI ---
-    
-    # 1. Siapkan struktur data utama
+    placeholders = ','.join(['%s'] * len(current_profiles))
+    cur.execute(f"""
+        SELECT timestamp, success, profile_name
+        FROM sends
+        WHERE user_id = %s AND timestamp >= %s AND profile_name IN ({placeholders})
+        ORDER BY timestamp ASC
+    """, [current_user.id, cutoff] + current_profiles)
+    rows = cur.fetchall()
     data = {
-        "dates": [r[0] for r in rows],
-        "success": sum(1 for r in rows if r[1]),
-        "failure": len(rows) - sum(1 for r in rows if r[1]),
+        "dates": [row['timestamp'].isoformat() for row in rows],
+        "success": sum(1 for row in rows if row['success']),
+        "failure": len(rows) - sum(1 for row in rows if row['success']),
         "total": len(rows),
-        "profiles": {}
+        "profiles": {profile_name: {"success": 0, "failure": 0, "timestamps": {}} for profile_name in current_profiles}
     }
-    
-    # 2. Inisialisasi SEMUA profil dengan nilai 0
-    for profile_name in current_profiles:
-        data["profiles"][profile_name] = {"success": 0, "failure": 0, "timestamps": {}}
-
-    # 3. Perbarui hitungan berdasarkan data yang ada di database
     for row in rows:
-        timestamp, success, profile_name = row
-        # Pastikan profil dari database masih ada di daftar profil saat ini
+        profile_name = row['profile_name']
         if profile_name in data["profiles"]:
-            data["profiles"][profile_name]["timestamps"][timestamp] = success
-            if success: 
+            data["profiles"][profile_name]["timestamps"][row['timestamp'].isoformat()] = row['success']
+            if row['success']:
                 data["profiles"][profile_name]["success"] += 1
-            else: 
+            else:
                 data["profiles"][profile_name]["failure"] += 1
-    
+    cur.close()
     conn.close()
     return jsonify(data)
 
+# Initialize logger and database
+setup_logger()
+init_db()
+
 if __name__ == '__main__':
-    # Pastikan debug=False untuk produksi
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
