@@ -4,5 +4,6 @@ gunicorn
 requests
 croniter
 werkzeug
-sqlite3
-psycopg2-binary
+psycopg2-binary  # Untuk PostgreSQL
+cloudinary       # Untuk upload gambar
+SQLAlchemy       # Untuk mempermudah interaksi database
